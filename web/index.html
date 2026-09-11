@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FreeBSD Command Console</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0a0f18;
+      color: #dce7f5;
+    }
+    * { box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      background:
+        radial-gradient(circle at 15% 0%, rgba(48, 128, 255, .16), transparent 34rem),
+        #0a0f18;
+    }
+    main {
+      width: min(960px, 100%);
+      min-height: 100vh;
+      margin: 0 auto;
+      padding: 28px 20px 20px;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 18px;
+    }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    h1 { margin: 0; font-size: clamp(1.25rem, 3vw, 1.75rem); font-weight: 650; letter-spacing: -.02em; }
+    .badge {
+      border: 1px solid #263650;
+      border-radius: 999px;
+      padding: 6px 10px;
+      color: #90a5be;
+      font: 12px ui-monospace, SFMono-Regular, Consolas, monospace;
+    }
+    #history {
+      min-height: 48vh;
+      overflow: auto;
+      padding: 6px 2px 20px;
+      scroll-behavior: smooth;
+    }
+    .empty { color: #6f829a; text-align: center; margin-top: 18vh; }
+    .entry { margin: 0 0 18px; }
+    .command {
+      width: fit-content;
+      max-width: 86%;
+      margin-left: auto;
+      padding: 11px 14px;
+      border: 1px solid #285dae;
+      border-radius: 14px 14px 3px 14px;
+      background: #173c72;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      font: 14px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+    }
+    .result {
+      margin-top: 10px;
+      border: 1px solid #1d2a3d;
+      border-radius: 12px 12px 12px 3px;
+      background: #0d1521;
+      overflow: hidden;
+    }
+    .result pre {
+      min-height: 44px;
+      max-height: 50vh;
+      margin: 0;
+      padding: 14px;
+      overflow: auto;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      color: #d5e1ee;
+      font: 13px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
+    }
+    .stderr { color: #ff8f92; }
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      padding: 7px 12px;
+      border-top: 1px solid #1d2a3d;
+      color: #8194aa;
+      font-size: 12px;
+    }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: #698096; }
+    .running .dot { background: #42d392; box-shadow: 0 0 0 4px rgba(66, 211, 146, .1); }
+    .failed .dot { background: #ff6469; }
+    form {
+      position: sticky;
+      bottom: 0;
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 10px;
+      padding: 12px;
+      border: 1px solid #263650;
+      border-radius: 14px;
+      background: rgba(14, 23, 36, .96);
+      box-shadow: 0 18px 60px rgba(0, 0, 0, .35);
+      backdrop-filter: blur(12px);
+    }
+    textarea {
+      min-height: 48px;
+      max-height: 150px;
+      resize: vertical;
+      border: 0;
+      outline: 0;
+      padding: 13px 10px;
+      background: transparent;
+      color: #eef5ff;
+      font: 14px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+    }
+    textarea::placeholder { color: #61738a; }
+    button {
+      align-self: center;
+      min-width: 76px;
+      height: 42px;
+      border: 0;
+      border-radius: 9px;
+      padding: 0 16px;
+      background: #2e7ae5;
+      color: white;
+      cursor: pointer;
+      font-weight: 650;
+    }
+    button:hover:not(:disabled) { filter: brightness(1.1); }
+    button:disabled { cursor: not-allowed; opacity: .42; }
+    #stop { background: #752f37; }
+    @media (max-width: 620px) {
+      main { padding: 18px 12px 12px; }
+      form { grid-template-columns: 1fr auto; }
+      textarea { grid-column: 1 / -1; }
+      .command { max-width: 95%; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <span class="badge">root · /bin/sh</span>
+      <span class="badge" id="client-ip" aria-live="polite">client: detecting…</span>
+      <a class="badge" href="/settings">settings</a>
+    </header>
+
+    <section id="history" aria-live="polite">
+      <p class="empty" id="empty">Enter a command to begin. Press Shift+Enter for a new line.</p>
+    </section>
+
+    <form id="command-form">
+      <textarea style="field-sizing: content;max-height: 50vh; resize: none;" id="command" rows="2" spellcheck="false" autocomplete="off" placeholder="service nginx status" aria-label="Shell command"></textarea>
+      <button type="submit" id="run">Run</button>
+      <button type="button" id="stop" disabled>Stop</button>
+    </form>
+  </main>
+
+  <script>
+    (() => {
+      const form = document.getElementById('command-form');
+      const input = document.getElementById('command');
+      const runButton = document.getElementById('run');
+      const stopButton = document.getElementById('stop');
+      const clientIP = document.getElementById('client-ip');
+      const history = document.getElementById('history');
+      let empty = document.getElementById('empty');
+      let controller = null;
+
+      async function loadClientIP() {
+        try {
+          const response = await fetch('/api/allowlist', { headers: { Accept: 'application/json' } });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const data = await response.json();
+          clientIP.textContent = `client: ${data.client_ip || 'unknown'}`;
+        } catch {
+          clientIP.textContent = 'client: unknown';
+        }
+      }
+
+      function setRunning(running) {
+        input.disabled = running;
+        runButton.disabled = running;
+        stopButton.disabled = !running;
+        if (!running) input.focus();
+      }
+
+      function clearHistory() {
+        history.replaceChildren();
+        empty = document.createElement('p');
+        empty.className = 'empty';
+        empty.id = 'empty';
+        empty.textContent = 'Enter a command to begin. Press Shift+Enter for a new line.';
+        history.append(empty);
+        input.value = '';
+        input.focus();
+      }
+
+      function createEntry(command) {
+        empty?.remove();
+        const entry = document.createElement('article');
+        entry.className = 'entry';
+
+        const commandBubble = document.createElement('div');
+        commandBubble.className = 'command';
+        commandBubble.textContent = command;
+
+        const result = document.createElement('div');
+        result.className = 'result';
+        const output = document.createElement('pre');
+        const status = document.createElement('div');
+        status.className = 'status running';
+        const dot = document.createElement('span');
+        dot.className = 'dot';
+        const statusText = document.createElement('span');
+        statusText.textContent = 'Connecting…';
+        status.append(dot, statusText);
+        result.append(output, status);
+        entry.append(commandBubble, result);
+        history.append(entry);
+        history.scrollTop = history.scrollHeight;
+        return { output, status, statusText };
+      }
+
+      function appendOutput(output, data, type) {
+        const span = document.createElement('span');
+        if (type === 'stderr') span.className = 'stderr';
+        span.textContent = data;
+        output.append(span);
+        output.scrollTop = output.scrollHeight;
+        history.scrollTop = history.scrollHeight;
+      }
+
+      function showEvent(parts, event) {
+        if (event.type === 'started') {
+          parts.statusText.textContent = `Running · request ${event.id}`;
+        } else if (event.type === 'stdout' || event.type === 'stderr') {
+          appendOutput(parts.output, event.data || '', event.type);
+        } else if (event.type === 'error') {
+          appendOutput(parts.output, `${event.message}\n`, 'stderr');
+          parts.status.className = 'status failed';
+          parts.statusText.textContent = 'Command error';
+        } else if (event.type === 'exited') {
+          const seconds = ((event.duration_ms || 0) / 1000).toFixed(2);
+          if (event.timed_out) {
+            parts.status.className = 'status failed';
+            parts.statusText.textContent = `Timed out after ${seconds}s`;
+          } else if (event.canceled) {
+            parts.status.className = 'status failed';
+            parts.statusText.textContent = `Canceled after ${seconds}s`;
+          } else {
+            parts.status.className = event.exit_code === 0 ? 'status' : 'status failed';
+            parts.statusText.textContent = `Exit ${event.exit_code} · ${seconds}s`;
+          }
+        }
+      }
+
+      async function runCommand(command, parts) {
+        controller = new AbortController();
+        setRunning(true);
+        try {
+          const response = await fetch('/api/commands', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command }),
+            signal: controller.signal
+          });
+          if (!response.ok) {
+            throw new Error((await response.text()).trim() || `HTTP ${response.status}`);
+          }
+          if (!response.body) throw new Error('Streaming response is unavailable');
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let pending = '';
+          while (true) {
+            const { value, done } = await reader.read();
+            pending += decoder.decode(value || new Uint8Array(), { stream: !done });
+            const lines = pending.split('\n');
+            pending = lines.pop() || '';
+            for (const line of lines) {
+              if (line.trim()) showEvent(parts, JSON.parse(line));
+            }
+            if (done) break;
+          }
+          if (pending.trim()) showEvent(parts, JSON.parse(pending));
+        } catch (error) {
+          parts.status.className = 'status failed';
+          if (error.name === 'AbortError') {
+            parts.statusText.textContent = 'Canceled in this browser';
+          } else {
+            appendOutput(parts.output, `${error.message}\n`, 'stderr');
+            parts.statusText.textContent = 'Request failed';
+          }
+        } finally {
+          controller = null;
+          setRunning(false);
+        }
+      }
+
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        if (controller) return;
+        const command = input.value;
+        if (!command.trim()) {
+          input.focus();
+          return;
+        }
+        if (command.trim() === 'clear') {
+          clearHistory();
+          return;
+        }
+        input.value = '';
+        runCommand(command, createEntry(command));
+      });
+
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && !event.shiftKey) {
+          event.preventDefault();
+          form.requestSubmit();
+        }
+      });
+
+      stopButton.addEventListener('click', () => controller?.abort());
+      loadClientIP();
+      input.focus();
+    })();
+  </script>
+</body>
+</html>

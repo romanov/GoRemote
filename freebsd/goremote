@@ -1,0 +1,33 @@
+#!/bin/sh
+# PROVIDE: goremote
+# REQUIRE: NETWORKING pf
+# KEYWORD: shutdown
+
+. /etc/rc.subr
+
+name="goremote"
+rcvar="goremote_enable"
+
+load_rc_config "$name"
+
+: ${goremote_enable:="NO"}
+: ${goremote_program:="/usr/local/sbin/goremote"}
+: ${goremote_listen:="0.0.0.0:8080"}
+: ${goremote_timeout:="10m"}
+: ${goremote_allowlist_file:="/var/db/goremote/allowed-ips.json"}
+
+command="/usr/sbin/daemon"
+procname="${goremote_program}"
+pidfile="/var/run/${name}.pid"
+command_args="-S -T ${name} -p ${pidfile} ${goremote_program} -listen ${goremote_listen} -timeout ${goremote_timeout} -allowlist-file ${goremote_allowlist_file}"
+
+goremote_prestart()
+{
+	if ! /sbin/pfctl -s info 2>/dev/null | /usr/bin/grep -q '^Status: Enabled'; then
+		err 1 "pf must be enabled before starting ${name}"
+	fi
+}
+
+start_precmd="goremote_prestart"
+
+run_rc_command "$1"

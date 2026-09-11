@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GoRemote Settings</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0a0f18;
+      color: #dce7f5;
+    }
+    * { box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      background: radial-gradient(circle at 15% 0%, rgba(48, 128, 255, .16), transparent 34rem), #0a0f18;
+    }
+    main { width: min(720px, 100%); margin: 0 auto; padding: 28px 20px; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+    h1 { margin: 0; font-size: clamp(1.35rem, 3vw, 1.8rem); font-weight: 650; letter-spacing: -.02em; }
+    a { color: #8ebcff; }
+    .panel { border: 1px solid #263650; border-radius: 14px; padding: 20px; background: rgba(14, 23, 36, .96); box-shadow: 0 18px 60px rgba(0, 0, 0, .25); }
+    .notice { margin: 0 0 18px; padding: 12px 14px; border: 1px solid #594b25; border-radius: 9px; color: #e8d49b; background: rgba(89, 75, 37, .16); line-height: 1.5; }
+    label { display: block; margin-bottom: 8px; font-weight: 650; }
+    textarea { width: 100%; min-height: 180px; resize: vertical; border: 1px solid #304564; border-radius: 9px; padding: 12px; outline: 0; background: #0a111d; color: #eef5ff; font: 14px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
+    textarea:focus { border-color: #4b91ee; box-shadow: 0 0 0 3px rgba(75, 145, 238, .16); }
+    .meta { display: grid; gap: 5px; margin: 14px 0 18px; color: #90a5be; font-size: 13px; }
+    button { min-width: 120px; height: 42px; border: 0; border-radius: 9px; padding: 0 16px; background: #2e7ae5; color: white; cursor: pointer; font-weight: 650; }
+    button:hover:not(:disabled) { filter: brightness(1.1); }
+    button:disabled { cursor: not-allowed; opacity: .5; }
+    #message { min-height: 1.4em; margin: 14px 0 0; color: #90a5be; font-size: 13px; }
+    .error { color: #ff8f92 !important; }
+    .success { color: #67dca6 !important; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Access settings</h1>
+      <a href="/">Back to console</a>
+    </header>
+    <section class="panel">
+      <p class="notice">Every address in this list can open this page and replace the list. Saving an empty list disables IP enforcement and allows all clients.</p>
+      <form id="settings-form">
+        <label for="addresses">Allowed IP addresses</label>
+        <textarea id="addresses" spellcheck="false" autocomplete="off" placeholder="192.0.2.10&#10;2001:db8::10" aria-describedby="help"></textarea>
+        <div class="meta">
+          <span id="help">Enter one exact IPv4 or IPv6 address per line. CIDR ranges are not supported.</span>
+          <span id="client-ip">Current client: detecting…</span>
+          <span id="enforcement">Enforcement: detecting…</span>
+        </div>
+        <button type="submit" id="save">Save addresses</button>
+        <p id="message" role="status"></p>
+      </form>
+    </section>
+  </main>
+  <script>
+    (() => {
+      const form = document.getElementById('settings-form');
+      const input = document.getElementById('addresses');
+      const save = document.getElementById('save');
+      const message = document.getElementById('message');
+      const clientIP = document.getElementById('client-ip');
+      const enforcement = document.getElementById('enforcement');
+
+      function setMessage(text, kind) {
+        message.textContent = text;
+        message.className = kind || '';
+      }
+
+      async function readResponse(response) {
+        if (!response.ok) throw new Error((await response.text()).trim() || `HTTP ${response.status}`);
+        return response.json();
+      }
+
+      async function load() {
+        try {
+          const data = await readResponse(await fetch('/api/allowlist', { headers: { Accept: 'application/json' } }));
+          input.value = data.addresses.join('\n');
+          clientIP.textContent = `Current client: ${data.client_ip || 'unknown'}`;
+          enforcement.textContent = `Enforcement: ${data.enabled ? 'enabled' : 'disabled'}`;
+        } catch (error) {
+          setMessage(error.message, 'error');
+        }
+      }
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        save.disabled = true;
+        setMessage('Saving…');
+        const addresses = input.value.split('\n').map((address) => address.trim()).filter(Boolean);
+        try {
+          const data = await readResponse(await fetch('/api/allowlist', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ addresses })
+          }));
+          input.value = data.addresses.join('\n');
+          enforcement.textContent = `Enforcement: ${data.enabled ? 'enabled' : 'disabled'}`;
+          setMessage(data.enabled ? 'Saved. New requests are now restricted.' : 'Saved. IP enforcement is disabled.', 'success');
+        } catch (error) {
+          setMessage(error.message, 'error');
+        } finally {
+          save.disabled = false;
+        }
+      });
+
+      load();
+    })();
+  </script>
+</body>
+</html>
