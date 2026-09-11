@@ -1,6 +1,8 @@
-# GoRemote
+# FreeBSD Pilot
 
-GoRemote is a small, dependency-free FreeBSD web command console. It serves a
+<img width="450" height="150" alt="logo" src="https://github.com/user-attachments/assets/0121a617-4ba6-4ace-841d-5d4ff38e8ef5" />
+
+FreeBSD Pilot is a small, dependency-free FreeBSD web command console. It serves a
 chat-style page on port 8080, runs each submitted command with `/bin/sh -c`, and
 streams stdout and stderr back as newline-delimited JSON.
 
